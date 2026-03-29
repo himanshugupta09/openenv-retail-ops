@@ -1,0 +1,12 @@
+name: "RetailOpsEnv"
+version: "1.0.0"
+description: "An E-Commerce Operations agent environment for handling customer tickets, checking inventory, and processing refunds."
+action_space: "Tool calls (query_database, issue_refund, restock_inventory, escalate_ticket, submit_final_answer)"
+observation_space: "Customer ticket text, JSON database query results, and system messages."
+tasks:
+  - id: "easy_escalation"
+    difficulty: "easy"
+  - id: "medium_refund"
+    difficulty: "medium"
+  - id: "hard_reconciliation"
+    difficulty: "hard"
