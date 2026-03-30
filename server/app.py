@@ -14,9 +14,9 @@ def reset_env():
     obs = env.reset()
     return obs.model_dump()
 
-# This is the entry point the grader is looking for
 def main():
-    uvicorn.run("server:app", host="0.0.0.0", port=7860)
+    # Updated to point to the new folder structure
+    uvicorn.run("server.app:app", host="0.0.0.0", port=7860)
 
 if __name__ == "__main__":
     main()
