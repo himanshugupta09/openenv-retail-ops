@@ -8,14 +8,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application
+# Copy the rest of the application (this automatically grabs your new 'server' folder)
 COPY . .
 
-# Hugging Face Spaces requires the app to listen on 0.0.0.0:7860
-# For a pure scripting environment, you usually CMD the inference script, 
-# but if the OpenEnv validator requires a running server:
-# CMD ["python", "inference.py"]
-# Or if it needs a dummy FastAPI server to pass the HF deployment ping:
-RUN pip install fastapi uvicorn
-COPY server.py .
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "7860"]
+# Expose the port Hugging Face expects
+EXPOSE 7860
+
+# Start the Uvicorn server pointing to the new server/app.py file
+CMD ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "7860"]
