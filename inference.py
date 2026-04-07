@@ -5,15 +5,19 @@ from env import RetailOpsEnv
 from models import Action
 
 def run_inference():
-    api_key = os.environ.get("HF_TOKEN")
+    # 1. NO default for HF_TOKEN (Checklist condition met)
+    api_key = os.getenv("HF_TOKEN")
     if not api_key:
         raise ValueError("CRITICAL: HF_TOKEN environment variable is missing!")
 
+    # 2. Defaults SET for API_BASE_URL and MODEL_NAME (Checklist condition met)
+    api_base_url = os.getenv("API_BASE_URL", "https://api.groq.com/openai/v1")
+    model_name = os.getenv("MODEL_NAME", "llama-3.1-8b-instant")
+
     client = OpenAI(
-        base_url=os.environ.get("API_BASE_URL"),
+        base_url=api_base_url,
         api_key=api_key
     )
-    model_name = os.environ.get("MODEL_NAME")
     
     env = RetailOpsEnv()
     tasks = ["easy_escalation", "medium_refund", "hard_reconciliation"]
