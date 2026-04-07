@@ -19,7 +19,9 @@ def run_inference():
     tasks = ["easy_escalation", "medium_refund", "hard_reconciliation"]
 
     for task in tasks:
-        print(f"\n--- Starting Task: {task} ---")
+        # --- REQUIRED OPENENV TAG ---
+        print(f"[START] task={task}", flush=True)
+        
         obs = env.reset(task_id=task)
         done = False
         
@@ -34,7 +36,7 @@ def run_inference():
             Available tools and their required args:
             - query_database: {{"order_id": "string"}}
             - issue_refund: {{"order_id": "string"}}
-            - restock_inventory: {{"item": "string"}} (You must use the actual item name from the DB query, e.g., 'wrong_item')
+            - restock_inventory: {{"item": "string"}}
             - escalate_ticket: {{}}
             - submit_final_answer: {{}}
             
@@ -53,14 +55,20 @@ def run_inference():
                 action_data = json.loads(response.choices[0].message.content)
                 action = Action(**action_data)
                 
-                print(f"Agent Action: {action.tool_name} | Args: {action.tool_args}")
+                print(f"Agent Action: {action.tool_name} | Args: {action.tool_args}", flush=True)
                 obs, reward, done, info = env.step(action)
                 
+                # --- REQUIRED OPENENV TAG ---
+                print(f"[STEP] step={env.step_count} reward={reward}", flush=True)
+                
             except Exception as e:
-                print(f"Agent produced invalid format or API error: {e}")
+                print(f"Agent produced invalid format or API error: {e}", flush=True)
                 obs, reward, done, info = env.step(Action(tool_name="submit_final_answer", tool_args={}))
+                # Catch errors and still print the step for the grader
+                print(f"[STEP] step={env.step_count} reward={reward}", flush=True)
 
-        print(f"Task {task} finished. Final Score: {info['score']}/1.0")
+        # --- REQUIRED OPENENV TAG ---
+        print(f"[END] task={task} score={info['score']} steps={env.step_count}", flush=True)
 
 if __name__ == "__main__":
     run_inference()
