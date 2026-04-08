@@ -1,89 +1,128 @@
-from models import Observation, Action
-from tasks import TASKS, grade_task
-import copy
+from typing import Optional, Dict, Any, Tuple
+from pydantic import BaseModel
+from models import Action
+
+# The Observation state returned to the LLM at every step
+class Observation(BaseModel):
+    ticket_text: str
+    db_result: Optional[Dict[str, Any]] = None
+    system_message: str
 
 class RetailOpsEnv:
     def __init__(self):
-        self.current_task_id = None
-        self.db = {}
-        self.ticket = ""
-        self.action_history = []
         self.step_count = 0
+        self.task_id = ""
+        self.state_data = {}
+        # Mock database initialized at the start of the environment
+        self.mock_db = {
+            "456": {"status": "shipped", "item": "Laptop Stand", "refunded": False},
+            "789": {"status": "shipped", "item": "Mechanical Keyboard", "refunded": False, "wrong_item_shipped": True}
+        }
+        self.obs = Observation(ticket_text="", system_message="")
 
     def reset(self, task_id: str = "easy_escalation") -> Observation:
-        self.current_task_id = task_id
-        task_data = TASKS[task_id]
-        self.ticket = task_data["ticket"]
-        self.db = copy.deepcopy(task_data["initial_db"])
-        self.action_history = []
         self.step_count = 0
+        self.task_id = task_id
         
-        return Observation(
-            ticket_text=self.ticket,
-            system_message="Environment reset. Awaiting action."
-        )
-
-    def state(self) -> dict:
-        return {
-            "task_id": self.current_task_id,
-            "db": self.db,
-            "action_history": self.action_history,
-            "steps": self.step_count
+        # Reset task tracking states
+        self.state_data = {
+            "escalated": False, 
+            "refunded": False, 
+            "restocked": False
         }
-
-    def step(self, action: Action):
-        self.step_count += 1
-        self.action_history.append(action.model_dump())
         
-        reward = 0.0
+        # Load the correct ticket scenario based on the task_id
+        if task_id == "easy_escalation":
+            self.obs = Observation(
+                ticket_text="I DEMAND TO SPEAK TO A MANAGER IMMEDIATELY! THIS IS UNACCEPTABLE!",
+                system_message="New ticket received."
+            )
+        elif task_id == "medium_refund":
+            self.obs = Observation(
+                ticket_text="My order 456 arrived damaged. Please refund me.",
+                system_message="New ticket received."
+            )
+        elif task_id == "hard_reconciliation":
+            self.obs = Observation(
+                ticket_text="I ordered a mouse but received a Mechanical Keyboard for order 789. Cancel and refund it.",
+                system_message="New ticket received."
+            )
+        else:
+            self.obs = Observation(ticket_text="Unknown task.", system_message="Error")
+            
+        return self.obs
+
+    def step(self, action: Action) -> Tuple[Observation, float, bool, Dict[str, Any]]:
+        self.step_count += 1
+        reward = 0.01  # Safe minimum reward
         done = False
-        obs = Observation(ticket_text=self.ticket, system_message="")
+        
+        # Tool Execution Logic
+        if action.tool_name == "query_database":
+            order_id = action.tool_args.get("order_id", "")
+            if order_id in self.mock_db:
+                self.obs.db_result = self.mock_db[order_id]
+                self.obs.system_message = f"Database queried for order {order_id}."
+                reward = 0.5
+            else:
+                self.obs.db_result = None
+                self.obs.system_message = "Order not found."
+                
+        elif action.tool_name == "issue_refund":
+            order_id = action.tool_args.get("order_id", "")
+            if order_id in self.mock_db and not self.mock_db[order_id]["refunded"]:
+                self.mock_db[order_id]["refunded"] = True
+                self.state_data["refunded"] = True
+                self.obs.system_message = f"Refund issued for order {order_id}."
+                reward = 0.5
+            else:
+                self.obs.system_message = "Invalid refund request or already refunded."
+                
+        elif action.tool_name == "restock_inventory":
+            item = action.tool_args.get("item", "")
+            if item:
+                self.state_data["restocked"] = True
+                self.obs.system_message = f"Inventory restocked for item: {item}."
+                reward = 0.5
+            else:
+                self.obs.system_message = "Invalid restock request."
 
-        tool = action.tool_name
-        args = action.tool_args
-
-        try:
-            if tool == "query_database":
-                order_id = str(args.get("order_id", ""))
-                obs.db_result = {order_id: self.db.get(order_id, "Not found")}
-                obs.system_message = "Database queried successfully."
-                reward += 0.1 
-
-            elif tool == "issue_refund":
-                order_id = str(args.get("order_id", ""))
-                if order_id in self.db and not self.db[order_id].get("refunded"):
-                    self.db[order_id]["refunded"] = True
-                    obs.system_message = f"Refund issued for {order_id}."
-                    reward += 0.2
-                else:
-                    obs.system_message = "Invalid refund request."
-                    reward -= 0.1 
-
-            elif tool == "restock_inventory":
-                item = str(args.get("item", ""))
-                if "inventory" in self.db and item in self.db["inventory"]:
-                    self.db["inventory"][item] += 1
-                    obs.system_message = f"Restocked {item}."
-                    reward += 0.2
-                else:
-                    obs.system_message = "Item not found in inventory."
-                    reward -= 0.1
-
-            elif tool in ["escalate_ticket", "submit_final_answer"]:
-                obs.system_message = "Task completed by agent."
-                done = True # This correctly stops the loop
-
-        except Exception as e:
-            obs.system_message = f"Action failed: {str(e)}"
-            reward -= 0.2
-
-        if done or self.step_count >= 10:
+        elif action.tool_name == "escalate_ticket":
+            self.state_data["escalated"] = True
+            self.obs.system_message = "Ticket escalated to human manager."
             done = True
-            final_score = grade_task(self.current_task_id, self.state(), self.action_history)
-            if final_score >= 0.8:
-                reward += 1.0
-            elif final_score == 0.0:
-                reward -= 0.5
+            
+        elif action.tool_name == "submit_final_answer":
+            self.obs.system_message = "Task marked as resolved."
+            done = True
+            
+        else:
+            self.obs.system_message = f"Unknown tool: {action.tool_name}"
 
-        info = {"score": grade_task(self.current_task_id, self.state(), self.action_history)}
-        return obs, reward, done, info
+        # Hard limit to prevent infinite loops
+        if self.step_count >= 10:
+            done = True
+
+        # --- CRITICAL SCORE CLAMPING FIX ---
+        # The OpenEnv validator requires scores to be strictly between 0 and 1. 
+        # We use 0.01 for failure and 0.99 for success.
+        score = 0.01  
+        
+        if done:
+            if self.task_id == "easy_escalation" and self.state_data["escalated"]:
+                score = 0.99
+            elif self.task_id == "medium_refund" and self.state_data["refunded"]:
+                score = 0.99
+            elif self.task_id == "hard_reconciliation" and self.state_data["refunded"] and self.state_data["restocked"]:
+                score = 0.99
+
+        info = {"score": score}
+        return self.obs, reward, done, info
+
+    def state(self) -> Dict[str, Any]:
+        return {
+            "step_count": self.step_count,
+            "task_id": self.task_id,
+            "observation": self.obs.model_dump(),
+            "db": self.mock_db
+        }
